@@ -1,0 +1,12 @@
+# Banco de dados
+data/memoria.db
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Ambiente virtual
+venv/
+
+# Logs
+logs/
