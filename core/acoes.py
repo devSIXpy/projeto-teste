@@ -40,7 +40,7 @@ def _solicitar_permissao(tipo: str, descricao: str) -> bool:
 
 def _executar_comando(args: list[str]) -> bool:
     try:
-        subprocess.run(args, check=True)
+        subprocess.run(args, check=True, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
         print(f"[AÇÃO] Programa não encontrado: {args[0]}")
         return False
