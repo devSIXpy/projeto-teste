@@ -1,6 +1,5 @@
-import os
+import time
 import subprocess
-import shlex
 from core.memoria import Memoria
 from core import acoes
 
@@ -65,13 +64,14 @@ class Cerebro:
 
         contexto_geral = contexto_conversa + "\n\n" + contexto_conhecimento
 
-        if self._executar_comando_sistema(entrada_usuario):
+        resultado_sistema = self._executar_comando_sistema(entrada_usuario)
+        if resultado_sistema is not None:
             self.memoria.salvar_conversa(
                 usuario=entrada_usuario,
-                assistente="[COMANDO DE SISTEMA EXECUTADO]",
+                assistente=resultado_sistema,
                 contexto=contexto_geral
             )
-            return "Comando executado."
+            return resultado_sistema
 
         resposta = self._processar_ollama(entrada_usuario, contexto_geral)
         resposta = resposta.strip() if resposta else (
@@ -94,7 +94,7 @@ class Cerebro:
     # CONTEXTO DA MEMÓRIA
     # ---------------------------------------------------------
 
-    def _montar_contexto_conversas(self, conversas: list) -> str:
+    def _montar_contexto_conversas(self, conversas: list[tuple[str, str]]) -> str:
         if not conversas:
             return "Não há conversas anteriores ainda."
 
@@ -124,7 +124,7 @@ class Cerebro:
                 input=prompt,
                 text=True,
                 capture_output=True,
-                timeout=60,
+                timeout=self._TIMEOUT_OLLAMA,
             )
 
             if resultado.returncode != 0:
@@ -161,10 +161,18 @@ class Cerebro:
     def _humanizar_resposta(self, texto: str) -> str:
         texto = texto.replace("**", "")
         texto = texto.replace("*", "")
-        texto = texto.replace("# ", "")
-        texto = texto.replace("## ", "")
+        texto = texto.replace("###### ", "")
+        texto = texto.replace("##### ", "")
+        texto = texto.replace("#### ", "")
         texto = texto.replace("### ", "")
+        texto = texto.replace("## ", "")
+        texto = texto.replace("# ", "")
         texto = texto.replace("`", "")
+
+        linhas = texto.splitlines()
+        linhas = [ln[2:] if ln.startswith("- ") else ln for ln in linhas]
+        linhas = [ln for ln in linhas if ln.strip() != "---"]
+        texto = "\n".join(linhas)
 
         substituicoes = {
             "Claro!":             "Então,",
@@ -196,7 +204,7 @@ class Cerebro:
     # APRENDIZADO AUTOMÁTICO
     # ---------------------------------------------------------
 
-    def _verificar_aprendizado(self, entrada_usuario: str):
+    def _verificar_aprendizado(self, entrada_usuario: str) -> None:
         entrada_lower = entrada_usuario.lower()
         gatilhos = ["lembra que", "guarda que", "salva que", "não esqueça que"]
 
@@ -215,7 +223,7 @@ class Cerebro:
                     print(f"[MEMÓRIA] Interesse salvo: {valor}")
 
                 else:
-                    chave = f"fato_{len(trecho)}"
+                    chave = f"fato_{int(time.time())}"
                     self.memoria.aprender(chave, trecho)
                     print(f"[MEMÓRIA] Fato salvo: {trecho}")
 
@@ -225,99 +233,114 @@ class Cerebro:
     # DETECÇÃO DE COMANDOS DE SISTEMA
     # ---------------------------------------------------------
 
-    def _executar_comando_sistema(self, texto: str) -> bool:
+    _TIMEOUT_OLLAMA: int = 60
+
+    _GATILHOS_NAVEGADOR: list[str] = [
+        "abrir navegador", "abrir o navegador", "abre o navegador",
+        "abre navegador", "abra o navegador", "abrir firefox",
+        "abre o firefox", "abrir chrome", "abre o chrome",
+        "abrir browser", "abra o browser",
+    ]
+
+    _GATILHOS_PESQUISA: list[str] = [
+        "pesquisar", "pesquisa", "buscar", "busca",
+        "procurar", "procura", "pesquise", "busque",
+    ]
+
+    _INDICADORES_GOOGLE: list[str] = [
+        "no google", "pelo google", "no navegador",
+        "na internet", "na web",
+    ]
+
+    _GATILHOS_PASTA: list[str] = [
+        "abrir pasta", "abrir a pasta", "abre a pasta",
+        "abre pasta", "abra a pasta", "abrir diretório",
+        "abre o diretório", "mostrar pasta", "mostrar a pasta",
+    ]
+
+    _PASTAS_CONHECIDAS: dict[str, str] = {
+        "documentos":       "~/Documentos",
+        "downloads":        "~/Downloads",
+        "imagens":          "~/Imagens",
+        "área de trabalho": "~/Área de trabalho",
+        "desktop":          "~/Área de trabalho",
+        "música":           "~/Música",
+        "musica":           "~/Música",
+        "vídeos":           "~/Vídeos",
+        "videos":           "~/Vídeos",
+        "projeto":          "~/minha-ia",
+        "minha ia":         "~/minha-ia",
+    }
+
+    def _executar_comando_sistema(self, texto: str) -> str | None:
         txt = texto.lower().strip()
 
-        gatilhos_navegador = [
-            "abrir navegador", "abrir o navegador", "abre o navegador",
-            "abre navegador", "abra o navegador", "abrir firefox",
-            "abre o firefox", "abrir chrome", "abre o chrome",
-            "abrir browser", "abra o browser",
-        ]
+        if any(g in txt for g in self._GATILHOS_PESQUISA):
+            return self._tentar_pesquisa(txt)
 
-        gatilhos_pesquisa = [
-            "pesquisar", "pesquisa", "buscar", "busca",
-            "procurar", "procura", "pesquise", "busque",
-        ]
+        if any(g in txt for g in self._GATILHOS_NAVEGADOR):
+            return self._tentar_navegador()
 
-        indicadores_google = [
-            "no google", "pelo google", "no navegador",
-            "na internet", "na web",
-        ]
+        if any(g in txt for g in self._GATILHOS_PASTA):
+            return self._tentar_pasta(txt)
 
-        gatilhos_pasta = [
-            "abrir pasta", "abrir a pasta", "abre a pasta",
-            "abre pasta", "abra a pasta", "abrir diretório",
-            "abre o diretório", "mostrar pasta", "mostrar a pasta",
-        ]
+        return None
 
-        pastas_conhecidas = {
-            "documentos":       "~/Documentos",
-            "downloads":        "~/Downloads",
-            "imagens":          "~/Imagens",
-            "área de trabalho": "~/Área de trabalho",
-            "desktop":          "~/Área de trabalho",
-            "música":           "~/Música",
-            "musica":           "~/Música",
-            "vídeos":           "~/Vídeos",
-            "videos":           "~/Vídeos",
-            "projeto":          "~/minha-ia",
-            "minha ia":         "~/minha-ia",
-        }
+    def _tentar_pesquisa(self, txt: str) -> str | None:
+        termo = txt
 
-        tem_gatilho_pesquisa = any(g in txt for g in gatilhos_pesquisa)
+        for g in self._GATILHOS_PESQUISA:
+            if termo.startswith(g):
+                termo = termo[len(g):].strip()
+                break
+            if g in termo:
+                termo = termo.split(g, 1)[1].strip()
+                break
 
-        if tem_gatilho_pesquisa:
-            termo = txt
+        for ind in self._INDICADORES_GOOGLE:
+            if termo.endswith(ind):
+                termo = termo[: -len(ind)].strip()
+                break
+            if ind in termo:
+                termo = termo.replace(ind, "").strip()
+                break
 
-            for g in gatilhos_pesquisa:
-                if termo.startswith(g):
-                    termo = termo[len(g):].strip()
-                    break
-                if g in termo:
-                    termo = termo.split(g, 1)[1].strip()
-                    break
+        for conector in ["sobre", "por", "a respeito de", "acerca de"]:
+            if termo.startswith(conector + " "):
+                termo = termo[len(conector):].strip()
 
-            for ind in indicadores_google:
-                if termo.endswith(ind):
-                    termo = termo[: -len(ind)].strip()
-                    break
-                if ind in termo:
-                    termo = termo.replace(ind, "").strip()
-                    break
+        if not termo:
+            return "Não entendi o que pesquisar. Pode repetir com o termo da busca?"
 
-            for conector in ["sobre", "por", "a respeito de", "acerca de"]:
-                if termo.startswith(conector + " "):
-                    termo = termo[len(conector):].strip()
+        if not acoes.pesquisar_google(termo):
+            return None
 
-            if termo:
-                acoes.pesquisar_google(termo)
-                print(f"[AÇÃO] Pesquisa executada: {termo}")
-                return True
+        return f'Pesquisei "{termo}" no Google pra você.'
 
-        if any(g in txt for g in gatilhos_navegador):
-            acoes.abrir_navegador()
-            print("[AÇÃO] Navegador aberto.")
-            return True
+    def _tentar_navegador(self) -> str | None:
+        if not acoes.abrir_navegador():
+            return None
 
-        if any(g in txt for g in gatilhos_pasta):
-            caminho = txt
-            for g in gatilhos_pasta:
-                if g in caminho:
-                    caminho = caminho.split(g, 1)[1].strip()
-                    break
+        return "Abri o navegador pra você."
 
-            for artigo in ["a ", "o ", "as ", "os ", "da ", "do ", "de "]:
-                if caminho.startswith(artigo):
-                    caminho = caminho[len(artigo):].strip()
+    def _tentar_pasta(self, txt: str) -> str | None:
+        caminho = txt
 
-            if caminho in pastas_conhecidas:
-                caminho = pastas_conhecidas[caminho]
-            elif not caminho.startswith(("/", "~")):
-                caminho = f"~/{caminho}"
+        for g in self._GATILHOS_PASTA:
+            if g in caminho:
+                caminho = caminho.split(g, 1)[1].strip()
+                break
 
-            acoes.abrir_pasta(caminho)
-            print(f"[AÇÃO] Pasta aberta: {caminho}")
-            return True
+        for artigo in ["a ", "o ", "as ", "os ", "da ", "do ", "de "]:
+            if caminho.startswith(artigo):
+                caminho = caminho[len(artigo):].strip()
 
-        return False
+        if caminho in self._PASTAS_CONHECIDAS:
+            caminho = self._PASTAS_CONHECIDAS[caminho]
+        elif not caminho.startswith(("/", "~")):
+            caminho = f"~/{caminho}"
+
+        if not acoes.abrir_pasta(caminho):
+            return None
+
+        return f"Abri a pasta {caminho} pra você."

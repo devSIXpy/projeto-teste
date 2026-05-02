@@ -1,70 +1,90 @@
 import os
 import shutil
 import subprocess
-import shlex
 from pathlib import Path
+from urllib.parse import quote_plus
+
 
 # ---------------------------------------------------------
-# UTILIDADES GERAIS
+# PERMISSÕES
 # ---------------------------------------------------------
 
-def _executar_comando(comando: str) -> bool:
+def _solicitar_permissao(tipo: str, descricao: str) -> bool:
     """
-    Executa um comando no shell de forma segura.
-    Retorna True se o comando terminou com código 0, False caso contrário.
+    tipo: 'leitura' | 'abertura' | 'busca' | 'modificacao' | 'critica'
+    Ações automáticas retornam True sem perguntar.
+    Ações modificadoras/críticas pedem confirmação ao usuário.
     """
-    try:
-        # shlex.split garante que espaços e aspas sejam tratados corretamente
-        subprocess.run(shlex.split(comando), check=True)
+    if tipo in ("leitura", "abertura", "busca"):
         return True
-    except FileNotFoundError:
-        print(f"[AÇÃO] Programa não encontrado: {comando}")
-    except subprocess.CalledProcessError as e:
-        print(f"[AÇÃO] Erro ao executar '{comando}': {e}")
-    except Exception as e:
-        print(f"[AÇÃO] Exceção inesperada: {e}")
+
+    if tipo == "critica":
+        aviso = f"[!! AÇÃO CRÍTICA !!] {descricao}"
+        mensagem_cancelamento = "[!! CANCELADO] Ação crítica interrompida pelo usuário."
+    else:
+        aviso = f"[CONFIRMAÇÃO] {descricao}"
+        mensagem_cancelamento = "[CANCELADO] Ação não executada."
+
+    resposta = input(f"{aviso}\nConfirma? (s/n): ").strip().lower()
+
+    if resposta in ("s", "sim"):
+        return True
+
+    print(mensagem_cancelamento)
     return False
+
+
+# ---------------------------------------------------------
+# EXECUÇÃO SEGURA
+# ---------------------------------------------------------
+
+def _executar_comando(args: list[str]) -> bool:
+    try:
+        subprocess.run(args, check=True)
+    except FileNotFoundError:
+        print(f"[AÇÃO] Programa não encontrado: {args[0]}")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"[AÇÃO] Erro ao executar {args[0]}: código {e.returncode}")
+        return False
+    except Exception as e:
+        print(f"[AÇÃO] Erro inesperado ao executar {args[0]}: {e}")
+        return False
+    return True
 
 
 # ---------------------------------------------------------
 # AÇÕES DE SISTEMA
 # ---------------------------------------------------------
 
-def abrir_navegador(url: str = "https://www.google.com") -> bool:
-    """
-    Abre o navegador padrão (Chrome ou Firefox) apontando para a URL informada.
-    Se nenhum dos dois estiver instalado, tenta usar `xdg-open` (padrão do Linux).
-    """
-    # Abir navegador
+def _abrir_url(url: str) -> bool:
     for navegador in ["firefox", "chromium-browser", "google-chrome"]:
         if shutil.which(navegador):
-            return _executar_comando(f"{navegador} {shlex.quote(url)}")
-    # Fallback genérico (abre com o aplicativo padrão do sistema)
-    return _executar_comando(f"xdg-open {shlex.quote(url)}")
+            return _executar_comando([navegador, url])
+    return _executar_comando(["xdg-open", url])
+
+
+def abrir_navegador(url: str = "https://www.google.com") -> bool:
+    if not _solicitar_permissao("abertura", f"Abrir navegador em: {url}"):
+        return False
+    return _abrir_url(url)
 
 
 def pesquisar_google(consulta: str) -> bool:
-    """
-    Monta a URL de busca do Google e abre no navegador.
-    Exemplo: consulta = "youtube" → https://www.google.com/search?q=youtube
-    """
-    from urllib.parse import quote_plus
+    if not _solicitar_permissao("busca", f"Pesquisar no Google: {consulta}"):
+        return False
     url = f"https://www.google.com/search?q={quote_plus(consulta)}"
-    return abrir_navegador(url)
+    return _abrir_url(url)
 
 
 def abrir_pasta(caminho: str) -> bool:
-    """
-    Abre a pasta indicada no gerenciador de arquivos padrão.
-    - Se for caminho relativo, resolve a partir do diretório HOME.
-    - Usa `xdg-open` (funciona na maioria das distros Linux).
-    """
-    # Resolve ~ e caminhos relativos
-    caminho_resolvido = os.path.expanduser(caminho)
-    caminho_resolvido = os.path.abspath(caminho_resolvido)
+    caminho_resolvido = str(Path(os.path.expanduser(caminho)).resolve())
 
     if not Path(caminho_resolvido).is_dir():
         print(f"[AÇÃO] Não é uma pasta válida: {caminho_resolvido}")
         return False
 
-    return _executar_comando(f"xdg-open {shlex.quote(caminho_resolvido)}")
+    if not _solicitar_permissao("abertura", f"Abrir pasta: {caminho_resolvido}"):
+        return False
+
+    return _executar_comando(["xdg-open", caminho_resolvido])

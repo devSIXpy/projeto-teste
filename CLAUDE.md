@@ -74,6 +74,16 @@ Usar sempre `subprocess` com lista de argumentos, nunca string com `shell=True`.
 
 ---
 
+## Padrões Obrigatórios em Funções
+
+- Funções com retorno `bool` sempre retornam explicitamente `True` ou `False` em todos os caminhos possíveis — nunca `None`
+- Usuário sempre recebe feedback visual quando uma ação é negada ou falha
+- Ações críticas devem ter destaque visual diferenciado das modificadoras comuns
+- `except: pass` é proibido — toda excessão capturada exibe mensagem informativa ao usuário
+- Tipagem explícita em toda função, sem excessão
+
+---
+
 ## O que NÃO fazer
 
 - Não usar APIs externas (tudo local)
