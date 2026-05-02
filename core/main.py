@@ -13,7 +13,7 @@ def __init__(self, db_path="data/memoria.db"):
     os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
 def main():
-    print("Iniciando IA...\n")
+    print("Iniciando Zion...\n")
 
     memoria = Memoria(db_path="data/memoria.db")
     cerebro = Cerebro(memoria)

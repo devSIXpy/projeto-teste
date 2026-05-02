@@ -12,7 +12,7 @@ class Cerebro:
         self.modelo_ollama = "llama3.2:3b"
 
         self.prompt_sistema = (
-            "Você é Jarvis, assistente pessoal do Brayan. "
+            "Você é Zion (pronuncia-se 'zaion'), assistente pessoal do Brayan. "
             "Sua personalidade é calorosa, curiosa e natural. "
             "Aqui estão suas diretrizes de comportamento:\n\n"
 
