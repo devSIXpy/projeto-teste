@@ -1,6 +1,10 @@
 import sqlite3
+from contextlib import closing
 from datetime import datetime
-import os
+from pathlib import Path
+
+_DB_PADRAO = Path(__file__).parent.parent / "data" / "memoria.db"
+
 
 class Memoria:
     """
@@ -10,59 +14,50 @@ class Memoria:
     - Usa SQLite (arquivo .db local, leve e simples)
     """
 
-    def __init__(self, db_path="data/memoria.db"):
-        # Caminho do arquivo do banco de dados
-        self.db_path = db_path
-        # Garante que a pasta 'data' exista
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        # Cria as tabelas, se ainda não existirem
+    def __init__(self, db_path: Path | str = _DB_PADRAO) -> None:
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._criar_tabelas()
 
-    def _conectar(self):
-        """
-        Cria e retorna uma conexão com o banco de dados.
-        Cada chamada abre e depois vamos fechar (boa prática).
-        """
-        return sqlite3.connect(self.db_path)
-
-    def _criar_tabelas(self):
+    def _criar_tabelas(self) -> None:
         """
         Cria as tabelas necessárias para a memória:
         - conversas: histórico de diálogos
         - conhecimento: fatos importantes que a IA aprende
         """
-        conn = self._conectar()
-        cursor = conn.cursor()
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
 
-        # Tabela de conversas (histórico)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                usuario TEXT,
-                assistente TEXT,
-                contexto TEXT
-            )
-        """)
+                    # Tabela de conversas (histórico)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS conversas (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            timestamp TEXT,
+                            usuario TEXT,
+                            assistente TEXT,
+                            contexto TEXT
+                        )
+                    """)
 
-        # Tabela de conhecimento (fatos que a IA deve lembrar)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conhecimento (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chave TEXT UNIQUE,
-                valor TEXT,
-                timestamp TEXT
-            )
-        """)
-
-        conn.commit()
-        conn.close()
+                    # Tabela de conhecimento (fatos que a IA deve lembrar)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS conhecimento (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            chave TEXT UNIQUE,
+                            valor TEXT,
+                            timestamp TEXT
+                        )
+                    """)
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao criar tabelas: {e}")
 
     # ---------------------------------------------------------
     # HISTÓRICO DE CONVERSAS
     # ---------------------------------------------------------
 
-    def salvar_conversa(self, usuario, assistente, contexto=""):
+    def salvar_conversa(self, usuario: str, assistente: str, contexto: str = "") -> None:
         """
         Salva uma interação entre você e a IA.
 
@@ -70,47 +65,52 @@ class Memoria:
         - assistente: texto que a IA respondeu
         - contexto: qualquer informação extra relevante (opcional)
         """
-        conn = self._conectar()
-        cursor = conn.cursor()
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
 
-        timestamp = datetime.now().isoformat(timespec="seconds")
+                    timestamp = datetime.now().isoformat(timespec="seconds")
 
-        cursor.execute("""
-            INSERT INTO conversas (timestamp, usuario, assistente, contexto)
-            VALUES (?, ?, ?, ?)
-        """, (timestamp, usuario, assistente, contexto))
+                    cursor.execute("""
+                        INSERT INTO conversas (timestamp, usuario, assistente, contexto)
+                        VALUES (?, ?, ?, ?)
+                    """, (timestamp, usuario, assistente, contexto))
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao salvar conversa: {e}")
 
-        conn.commit()
-        conn.close()
-
-    def buscar_conversas_recentes(self, limite=5):
+    def buscar_conversas_recentes(self, limite: int = 5) -> list[tuple[str, str]]:
         """
         Retorna as últimas N conversas (por padrão 5), em ordem cronológica.
 
         Retorno: lista de tuplas (usuario, assistente)
         """
-        conn = self._conectar()
-        cursor = conn.cursor()
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT usuario, assistente
-            FROM conversas
-            ORDER BY id DESC
-            LIMIT ?
-        """, (limite,))
+                    cursor.execute("""
+                        SELECT usuario, assistente
+                        FROM conversas
+                        ORDER BY id DESC
+                        LIMIT ?
+                    """, (limite,))
 
-        resultados = cursor.fetchall()
-        conn.close()
+                    resultados = cursor.fetchall()
 
-        # fetchall retorna do mais recente para o mais antigo.
-        # Vamos inverter para ficar na ordem em que aconteceram.
-        return list(reversed(resultados))
+            # fetchall retorna do mais recente para o mais antigo.
+            # Vamos inverter para ficar na ordem em que aconteceram.
+            return list(reversed(resultados))
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao buscar conversas recentes: {e}")
+            return []
 
     # ---------------------------------------------------------
     # CONHECIMENTO (MEMÓRIA DE LONGO PRAZO)
     # ---------------------------------------------------------
 
-    def aprender(self, chave, valor):
+    def aprender(self, chave: str, valor: str) -> None:
         """
         Salva ou atualiza um conhecimento específico.
 
@@ -121,23 +121,24 @@ class Memoria:
 
         Se a chave já existir, o valor é atualizado.
         """
-        conn = self._conectar()
-        cursor = conn.cursor()
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
 
-        timestamp = datetime.now().isoformat(timespec="seconds")
+                    timestamp = datetime.now().isoformat(timespec="seconds")
 
-        cursor.execute("""
-            INSERT INTO conhecimento (chave, valor, timestamp)
-            VALUES (?, ?, ?)
-            ON CONFLICT(chave) DO UPDATE SET
-                valor = excluded.valor,
-                timestamp = excluded.timestamp
-        """, (chave, valor, timestamp))
+                    cursor.execute("""
+                        INSERT INTO conhecimento (chave, valor, timestamp)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(chave) DO UPDATE SET
+                            valor = excluded.valor,
+                            timestamp = excluded.timestamp
+                    """, (chave, valor, timestamp))
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao aprender '{chave}': {e}")
 
-        conn.commit()
-        conn.close()
-
-    def lembrar(self, chave):
+    def lembrar(self, chave: str) -> str | None:
         """
         Recupera o valor associado a uma chave de conhecimento.
 
@@ -145,41 +146,78 @@ class Memoria:
         - valor (string), se existir
         - None, se não existir
         """
-        conn = self._conectar()
-        cursor = conn.cursor()
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT valor FROM conhecimento
-            WHERE chave = ?
-        """, (chave,))
+                    cursor.execute("""
+                        SELECT valor FROM conhecimento
+                        WHERE chave = ?
+                    """, (chave,))
 
-        resultado = cursor.fetchone()
-        conn.close()
+                    resultado = cursor.fetchone()
 
-        if resultado:
-            return resultado[0]
-        return None
+            if resultado:
+                return resultado[0]
+            return None
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao lembrar '{chave}': {e}")
+            return None
 
-    def listar_conhecimentos(self):
+    def listar_conhecimentos(self) -> list[dict[str, str]]:
         """
         Lista tudo o que a IA já "aprendeu" (todas as chaves/valores).
         Útil para depuração e curiosidade.
 
         Retorno: lista de dicionários
         """
-        conn = self._conectar()
-        cursor = conn.cursor()
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT chave, valor, timestamp
-            FROM conhecimento
-            ORDER BY id DESC
-        """)
+                    cursor.execute("""
+                        SELECT chave, valor, timestamp
+                        FROM conhecimento
+                        ORDER BY id DESC
+                    """)
 
-        linhas = cursor.fetchall()
-        conn.close()
+                    linhas = cursor.fetchall()
 
-        return [
-            {"chave": chave, "valor": valor, "timestamp": timestamp}
-            for (chave, valor, timestamp) in linhas
-        ]
+            return [
+                {"chave": chave, "valor": valor, "timestamp": timestamp}
+                for (chave, valor, timestamp) in linhas
+            ]
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao listar conhecimentos: {e}")
+            return []
+
+    def esquecer(self, chave: str) -> None:
+        """Remove um conhecimento do banco pelo nome da chave."""
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        DELETE FROM conhecimento WHERE chave = ?
+                    """, (chave,))
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao esquecer '{chave}': {e}")
+
+    def limpar_conversas_antigas(self, manter: int = 100) -> None:
+        """Mantém apenas as últimas N conversas, deletando as mais antigas."""
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        DELETE FROM conversas
+                        WHERE id NOT IN (
+                            SELECT id FROM conversas
+                            ORDER BY id DESC
+                            LIMIT ?
+                        )
+                    """, (manter,))
+        except sqlite3.Error as e:
+            print(f"[MEMÓRIA] Erro ao limpar conversas antigas: {e}")
